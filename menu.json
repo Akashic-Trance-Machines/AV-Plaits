@@ -1,0 +1,95 @@
+{
+  "id": "plaits",
+  "name": "Plaits",
+  "kind": "generator",
+  "version": 1,
+  "credits": "Mutable Instruments (Émilie Gillet); port: Akashic Trance Machines",
+  "license": "MIT",
+
+  "params": [
+    {
+      "id": "engine",
+      "label": "Engine",
+      "type": "enum",
+      "default": 0,
+      "options": [
+        "VA Analog", "Waveshaper", "FM 2-op", "Grain", "Additive",
+        "Wavetable", "Chord", "Speech", "Swarm",
+        "Filtered Noise", "Particle", "String", "Modal",
+        "Bass Drum", "Snare Drum", "Hi-Hat",
+        "VA VCF", "Phase Dist", "6-op FM", "Wave Terr",
+        "Str Machine", "Chiptune"
+      ]
+    },
+    {
+      "id": "harmonics",
+      "label": "Harmonics",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.5,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "timbre",
+      "label": "Timbre",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.5,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "morph",
+      "label": "Morph",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.5,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "decay",
+      "label": "Decay",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.5,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "lpg_colour",
+      "label": "LPG Colour",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.5,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "fm_amt",
+      "label": "FM Amount",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "timbre_mod",
+      "label": "Timbre Mod",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "morph_mod",
+      "label": "Morph Mod",
+      "type": "float",
+      "min": 0.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    }
+  ],
+
+  "menu": [
+    { "page": "Main",   "items": ["engine", "harmonics", "timbre", "morph"] },
+    { "page": "Tone",   "items": ["decay", "lpg_colour"] },
+    { "page": "Mod",    "items": ["fm_amt", "timbre_mod", "morph_mod"] }
+  ]
+}

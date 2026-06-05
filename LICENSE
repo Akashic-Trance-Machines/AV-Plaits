@@ -1,0 +1,8 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+This module as a whole (wrapper code in src/) is licensed under GPL-3.0.
+The vendored DSP core in core/ retains its original MIT license.
+
+See core/plaits/LICENSE and core/stmlib/LICENSE for the upstream terms.
+See the top-level Akashic Vault repository for the full GPL-3.0 text.
