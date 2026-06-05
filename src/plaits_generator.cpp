@@ -9,7 +9,11 @@
 #include "plaits_generator.h"
 
 #include "stmlib/utils/buffer_allocator.h"
+#include "engine/imodule.h"
 #include <cstring>
+
+// Factory function expected by CModuleRegistry (gen_menus.py generates the extern).
+IModule *Create_plaits () { return new CPlaitsGenerator (); }
 
 // ── Param descriptors (matches menu.json ids) ────────────────────────────────
 enum ParamId : unsigned
@@ -28,16 +32,20 @@ enum ParamId : unsigned
 
 static const TParamDesc s_Params[NUM_PARAMS] =
 {
-	{ "engine",	"Engine",	ParamType::Int,		0.0f, 23.0f,	0.0f,  1.0f },
-	{ "harmonics",	"Harmonics",	ParamType::Float,	0.0f,  1.0f,	0.5f,  0.01f },
-	{ "timbre",	"Timbre",	ParamType::Float,	0.0f,  1.0f,	0.5f,  0.01f },
-	{ "morph",	"Morph",	ParamType::Float,	0.0f,  1.0f,	0.5f,  0.01f },
-	{ "decay",	"Decay",	ParamType::Float,	0.0f,  1.0f,	0.5f,  0.01f },
-	{ "lpg_colour",	"LPG Colour",	ParamType::Float,	0.0f,  1.0f,	0.5f,  0.01f },
-	{ "fm_amt",	"FM Amount",	ParamType::Float,	0.0f,  1.0f,	0.0f,  0.01f },
-	{ "timbre_mod",	"Timbre Mod",	ParamType::Float,	0.0f,  1.0f,	0.0f,  0.01f },
-	{ "morph_mod",	"Morph Mod",	ParamType::Float,	0.0f,  1.0f,	0.0f,  0.01f },
+	//  pId            pLabel         Type              Display              fMin  fMax  fDef  fStep  ppOpt  nOpt
+	{ "engine",       "Engine",      ParamType::Int,   ParamDisplay::Raw,   0.0f, 23.0f, 0.0f, 1.0f, nullptr, 0 },
+	{ "harmonics",    "Harmonics",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "timbre",       "Timbre",      ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "morph",        "Morph",       ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "decay",        "Decay",       ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "lpg_colour",   "LPG Colour",  ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "fm_amt",       "FM Amount",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "timbre_mod",   "Timbre Mod",  ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "morph_mod",    "Morph Mod",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.0f, 0.01f, nullptr, 0 },
 };
+
+// Null descriptor returned for out-of-range index.
+static const TParamDesc s_NullParam = { "", "", ParamType::Float, ParamDisplay::Raw, 0, 0, 0, 0, nullptr, 0 };
 
 // ── Constructor / Destructor ─────────────────────────────────────────────────
 
@@ -45,12 +53,18 @@ CPlaitsGenerator::CPlaitsGenerator ()
 :	m_nCurrentNote (60),
 	m_fVelocity (0.0f),
 	m_bGateOpen (false),
+	m_bTriggerArmed (false),
 	m_fPitchBend (0.0f)
 {
 	memset (&m_Patch, 0, sizeof (m_Patch));
 	memset (&m_Modulations, 0, sizeof (m_Modulations));
 	memset (m_VoiceMem, 0, sizeof (m_VoiceMem));
+}
 
+CPlaitsGenerator::~CPlaitsGenerator () {}
+
+void CPlaitsGenerator::Init (unsigned /*nSampleRate*/, unsigned /*nMaxBlock*/)
+{
 	stmlib::BufferAllocator allocator;
 	allocator.Init (m_VoiceMem, sizeof (m_VoiceMem));
 	m_Voice.Init (&allocator);
@@ -74,51 +88,72 @@ CPlaitsGenerator::CPlaitsGenerator ()
 	m_Modulations.level_patched     = true;
 }
 
-CPlaitsGenerator::~CPlaitsGenerator () {}
+void CPlaitsGenerator::Reset ()
+{
+	m_bGateOpen     = false;
+	m_bTriggerArmed = false;
+	m_fVelocity     = 0.0f;
+	m_nCurrentNote  = 60;
+	m_fPitchBend    = 0.0f;
+	// Re-init voice to clear all internal DSP state.
+	stmlib::BufferAllocator allocator;
+	allocator.Init (m_VoiceMem, sizeof (m_VoiceMem));
+	m_Voice.Init (&allocator);
+}
 
 // ── IModule: params ──────────────────────────────────────────────────────────
 
-unsigned CPlaitsGenerator::NumParams () const	{ return NUM_PARAMS; }
-const TParamDesc *CPlaitsGenerator::ParamDesc (unsigned i) const
+unsigned CPlaitsGenerator::NumParams () const { return NUM_PARAMS; }
+
+const TParamDesc &CPlaitsGenerator::ParamDesc (unsigned nIndex) const
 {
-	return (i < NUM_PARAMS) ? &s_Params[i] : nullptr;
+	return (nIndex < NUM_PARAMS) ? s_Params[nIndex] : s_NullParam;
 }
 
-float CPlaitsGenerator::GetParam (unsigned i) const
+TParamValue CPlaitsGenerator::GetParam (unsigned nIndex) const
 {
-	switch (i)
+	TParamValue v = { 0.0f };
+	switch (nIndex)
 	{
-		case P_ENGINE:		return (float) m_Patch.engine;
-		case P_HARMONICS:	return m_Patch.harmonics;
-		case P_TIMBRE:		return m_Patch.timbre;
-		case P_MORPH:		return m_Patch.morph;
-		case P_DECAY:		return m_Patch.decay;
-		case P_LPG_COLOUR:	return m_Patch.lpg_colour;
-		case P_FM_AMT:		return m_Patch.frequency_modulation_amount;
-		case P_TIMBRE_MOD:	return m_Patch.timbre_modulation_amount;
-		case P_MORPH_MOD:	return m_Patch.morph_modulation_amount;
-		default:		return 0.0f;
+		case P_ENGINE:		v.f = (float) m_Patch.engine; break;
+		case P_HARMONICS:	v.f = m_Patch.harmonics; break;
+		case P_TIMBRE:		v.f = m_Patch.timbre; break;
+		case P_MORPH:		v.f = m_Patch.morph; break;
+		case P_DECAY:		v.f = m_Patch.decay; break;
+		case P_LPG_COLOUR:	v.f = m_Patch.lpg_colour; break;
+		case P_FM_AMT:		v.f = m_Patch.frequency_modulation_amount; break;
+		case P_TIMBRE_MOD:	v.f = m_Patch.timbre_modulation_amount; break;
+		case P_MORPH_MOD:	v.f = m_Patch.morph_modulation_amount; break;
+	}
+	return v;
+}
+
+void CPlaitsGenerator::SetParam (unsigned nIndex, TParamValue Value)
+{
+	switch (nIndex)
+	{
+		case P_ENGINE:		m_Patch.engine = Value.AsInt (); break;
+		case P_HARMONICS:	m_Patch.harmonics = Value.f; break;
+		case P_TIMBRE:		m_Patch.timbre    = Value.f; break;
+		case P_MORPH:		m_Patch.morph     = Value.f; break;
+		case P_DECAY:		m_Patch.decay     = Value.f; break;
+		case P_LPG_COLOUR:	m_Patch.lpg_colour = Value.f; break;
+		case P_FM_AMT:		m_Patch.frequency_modulation_amount = Value.f; break;
+		case P_TIMBRE_MOD:	m_Patch.timbre_modulation_amount    = Value.f; break;
+		case P_MORPH_MOD:	m_Patch.morph_modulation_amount     = Value.f; break;
 	}
 }
 
-void CPlaitsGenerator::SetParam (unsigned i, float fValue)
+int CPlaitsGenerator::FindParam (const char *pId) const
 {
-	switch (i)
-	{
-		case P_ENGINE:		m_Patch.engine = (int) fValue; break;
-		case P_HARMONICS:	m_Patch.harmonics = fValue; break;
-		case P_TIMBRE:		m_Patch.timbre    = fValue; break;
-		case P_MORPH:		m_Patch.morph     = fValue; break;
-		case P_DECAY:		m_Patch.decay     = fValue; break;
-		case P_LPG_COLOUR:	m_Patch.lpg_colour = fValue; break;
-		case P_FM_AMT:		m_Patch.frequency_modulation_amount = fValue; break;
-		case P_TIMBRE_MOD:	m_Patch.timbre_modulation_amount    = fValue; break;
-		case P_MORPH_MOD:	m_Patch.morph_modulation_amount     = fValue; break;
-	}
+	for (unsigned i = 0; i < NUM_PARAMS; i++)
+		if (strcmp (s_Params[i].pId, pId) == 0)
+			return (int) i;
+	return -1;
 }
 
-bool CPlaitsGenerator::Serialize (uint8_t *, unsigned, unsigned *) const { return false; }
-bool CPlaitsGenerator::Deserialize (const uint8_t *, unsigned) { return false; }
+size_t CPlaitsGenerator::Serialize (uint8_t *, size_t) const { return 0; }
+size_t CPlaitsGenerator::Deserialize (const uint8_t *, size_t) { return 0; }
 
 // ── ISoundGenerator: MIDI ────────────────────────────────────────────────────
 
@@ -129,9 +164,10 @@ void CPlaitsGenerator::NoteOn (uint8_t nNote, uint8_t nVelocity)
 		NoteOff (nNote, 0);
 		return;
 	}
-	m_nCurrentNote = nNote;
-	m_fVelocity    = (float) nVelocity / 127.0f;
-	m_bGateOpen    = true;
+	m_nCurrentNote  = nNote;
+	m_fVelocity     = (float) nVelocity / 127.0f;
+	m_bGateOpen     = true;
+	m_bTriggerArmed = true;		// will emit rising-edge pulse in next Process()
 }
 
 void CPlaitsGenerator::NoteOff (uint8_t nNote, uint8_t /*nVelocity*/)
@@ -145,19 +181,22 @@ void CPlaitsGenerator::ControlChange (uint8_t nCC, uint8_t nValue)
 	float fNorm = (float) nValue / 127.0f;
 	switch (nCC)
 	{
-		case 1:   m_Patch.timbre    = fNorm; break;	// Mod wheel → timbre
-		case 2:   m_Patch.morph     = fNorm; break;	// Breath → morph
-		case 74:  m_Patch.harmonics = fNorm; break;	// CC74 → harmonics
+		case 1:   m_Patch.timbre    = fNorm; break;	// Mod wheel -> timbre
+		case 2:   m_Patch.morph     = fNorm; break;	// Breath -> morph
+		case 74:  m_Patch.harmonics = fNorm; break;	// CC74 -> harmonics
 		case 75:  m_Patch.decay     = fNorm; break;
 		case 76:  m_Patch.lpg_colour = fNorm; break;
 	}
 }
 
-void CPlaitsGenerator::PitchBend (int16_t nBend)
+void CPlaitsGenerator::PitchBend (int nValue14)
 {
-	// nBend = -8192..+8191 → ±2 semitones
-	m_fPitchBend = (float) nBend / 8192.0f * 2.0f;
+	// nValue14 = -8192..+8191 -> +/-2 semitones
+	m_fPitchBend = (float) nValue14 / 8192.0f * 2.0f;
 }
+
+void CPlaitsGenerator::ChannelPressure (uint8_t /*nValue*/) {}
+void CPlaitsGenerator::AllNotesOff () { m_bGateOpen = false; m_bTriggerArmed = false; m_fVelocity = 0.0f; }
 
 // ── ISoundGenerator: audio render ────────────────────────────────────────────
 
@@ -169,13 +208,17 @@ void CPlaitsGenerator::Process (float *pOutL, float *pOutR, unsigned nFrames)
 
 	// Set up modulations for this block.
 	m_Patch.note = (float) m_nCurrentNote + m_fPitchBend;
-	m_Modulations.note     = 0.0f;
+	m_Modulations.note      = 0.0f;
 	m_Modulations.frequency = 0.0f;
 	m_Modulations.harmonics = 0.0f;
-	m_Modulations.timbre   = 0.0f;
-	m_Modulations.morph    = 0.0f;
-	m_Modulations.trigger  = m_bGateOpen ? 1.0f : 0.0f;
-	m_Modulations.level    = m_bGateOpen ? m_fVelocity : 0.0f;
+	m_Modulations.timbre    = 0.0f;
+	m_Modulations.morph     = 0.0f;
+	// Trigger: Plaits expects a rising-edge pulse (0→1) for attack.
+	// Armed on NoteOn, fired once, then held at 0 while gate stays open.
+	// Level acts as VCA: velocity while gate open, 0 when released.
+	m_Modulations.trigger = m_bTriggerArmed ? 1.0f : 0.0f;
+	m_Modulations.level   = m_bGateOpen ? m_fVelocity : 0.0f;
+	m_bTriggerArmed = false;	// pulse consumed
 
 	unsigned written = 0;
 	while (written < nFrames)
@@ -187,12 +230,20 @@ void CPlaitsGenerator::Process (float *pOutL, float *pOutR, unsigned nFrames)
 		plaits::Voice::Frame frames[kPlaitsBlock];
 		m_Voice.Render (m_Patch, m_Modulations, frames, chunk);
 
-		// Convert int16 to float [-1, 1], write both channels.
-		static constexpr float kScale = 1.0f / 32768.0f;
+		// After the first sub-block, trigger must stay low (edge consumed).
+		m_Modulations.trigger = 0.0f;
+
+		// Convert int16 to float [-1, 1].
+		// Plaits' out = main engine, aux = alternate output.
+		// Send main to both L+R (mono); mix a touch of aux for stereo width.
+		static constexpr float kScale    = 1.0f / 32768.0f;
+		static constexpr float kAuxBlend = 0.2f;
 		for (unsigned i = 0; i < chunk; i++)
 		{
-			pOutL[written + i] = (float) frames[i].out * kScale;
-			pOutR[written + i] = (float) frames[i].aux * kScale;
+			float main = (float) frames[i].out * kScale;
+			float aux  = (float) frames[i].aux * kScale;
+			pOutL[written + i] = main + aux * kAuxBlend;
+			pOutR[written + i] = main - aux * kAuxBlend;
 		}
 		written += chunk;
 	}

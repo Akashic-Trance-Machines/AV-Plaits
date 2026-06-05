@@ -22,20 +22,27 @@ public:
 	// IModule
 	const char	*Id () const override	{ return "plaits"; }
 	const char	*Name () const override	{ return "Plaits"; }
+	ModuleKind	 Kind () const override	{ return ModuleKind::Generator; }
 
-	unsigned	 NumParams () const override;
-	const TParamDesc *ParamDesc (unsigned i) const override;
-	float		 GetParam (unsigned i) const override;
-	void		 SetParam (unsigned i, float fValue) override;
+	void		 Init (unsigned nSampleRate, unsigned nMaxBlock) override;
+	void		 Reset () override;
 
-	bool	Serialize (uint8_t *pBuf, unsigned nMaxLen, unsigned *pLen) const override;
-	bool	Deserialize (const uint8_t *pBuf, unsigned nLen) override;
+	unsigned		 NumParams () const override;
+	const TParamDesc	&ParamDesc (unsigned nIndex) const override;
+	TParamValue		 GetParam (unsigned nIndex) const override;
+	void			 SetParam (unsigned nIndex, TParamValue Value) override;
+	int			 FindParam (const char *pId) const override;
+
+	size_t	Serialize (uint8_t *pBuffer, size_t nCapacity) const override;
+	size_t	Deserialize (const uint8_t *pBuffer, size_t nLength) override;
 
 	// ISoundGenerator
 	void	NoteOn (uint8_t nNote, uint8_t nVelocity) override;
 	void	NoteOff (uint8_t nNote, uint8_t nVelocity) override;
 	void	ControlChange (uint8_t nCC, uint8_t nValue) override;
-	void	PitchBend (int16_t nBend) override;
+	void	PitchBend (int nValue14) override;
+	void	ChannelPressure (uint8_t nValue) override;
+	void	AllNotesOff () override;
 	void	Process (float *pOutL, float *pOutR, unsigned nFrames) override;
 
 private:
@@ -52,5 +59,6 @@ private:
 	uint8_t			m_nCurrentNote;
 	float			m_fVelocity;
 	bool			m_bGateOpen;
+	bool			m_bTriggerArmed;	// rising-edge pulse: set on NoteOn, cleared after 1st render
 	float			m_fPitchBend;		// semitones (-2..+2)
 };
