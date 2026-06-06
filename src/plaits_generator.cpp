@@ -30,10 +30,38 @@ enum ParamId : unsigned
 	NUM_PARAMS
 };
 
+// Engine names in Voice::Init() registration order (see plaits/dsp/voice.cc).
+static const char *const s_EngineNames[] =
+{
+	"VA Analog",		// 0  virtual_analog_engine
+	"Waveshaper",		// 1  waveshaping_engine
+	"FM 2-op",		// 2  fm_engine
+	"Grain",		// 3  grain_engine
+	"Additive",		// 4  additive_engine
+	"Wavetable",		// 5  wavetable_engine
+	"Chord",		// 6  chord_engine
+	"Speech",		// 7  speech_engine
+	"Swarm",		// 8  swarm_engine
+	"Filtered Noise",	// 9  noise_engine
+	"Particle",		// 10 particle_engine
+	"String",		// 11 string_engine
+	"Modal",		// 12 modal_engine
+	"Bass Drum",		// 13 bass_drum_engine
+	"Snare Drum",		// 14 snare_drum_engine
+	"Hi-Hat",		// 15 hi_hat_engine
+	"VA VCF",		// 16 virtual_analog_vcf_engine
+	"Phase Dist",		// 17 phase_distortion_engine
+	"6-op FM",		// 18 six_op_engine
+	"Wave Terrain",		// 19 wave_terrain_engine
+	"Str Machine",		// 20 string_machine_engine
+	"Chiptune",		// 21 chiptune_engine
+};
+static constexpr uint16_t NUM_ENGINES = 22;
+
 static const TParamDesc s_Params[NUM_PARAMS] =
 {
-	//  pId            pLabel         Type              Display              fMin  fMax  fDef  fStep  ppOpt  nOpt
-	{ "engine",       "Engine",      ParamType::Int,   ParamDisplay::Raw,   0.0f, 23.0f, 0.0f, 1.0f, nullptr, 0 },
+	//  pId            pLabel         Type               Display              fMin   fMax   fDef  fStep  ppOpt          nOpt
+	{ "engine",       "Engine",      ParamType::Enum,   ParamDisplay::Raw,   0.0f,  21.0f, 0.0f, 1.0f, s_EngineNames, NUM_ENGINES },
 	{ "harmonics",    "Harmonics",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
 	{ "timbre",       "Timbre",      ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
 	{ "morph",        "Morph",       ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
