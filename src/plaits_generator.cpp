@@ -31,37 +31,42 @@ enum ParamId : unsigned
 };
 
 // Engine names in Voice::Init() registration order (see plaits/dsp/voice.cc).
+// The extended-firmware engines (VA VCF … Chiptune) are registered FIRST at
+// indices 0-7; the classic 16 engines follow at indices 8-23 — 24 total.
+// six_op_engine_ is registered three times with different FM algorithm banks.
 static const char *const s_EngineNames[] =
 {
-	"VA Analog",		// 0  virtual_analog_engine
-	"Waveshaper",		// 1  waveshaping_engine
-	"FM 2-op",		// 2  fm_engine
-	"Grain",		// 3  grain_engine
-	"Additive",		// 4  additive_engine
-	"Wavetable",		// 5  wavetable_engine
-	"Chord",		// 6  chord_engine
-	"Speech",		// 7  speech_engine
-	"Swarm",		// 8  swarm_engine
-	"Filtered Noise",	// 9  noise_engine
-	"Particle",		// 10 particle_engine
-	"String",		// 11 string_engine
-	"Modal",		// 12 modal_engine
-	"Bass Drum",		// 13 bass_drum_engine
-	"Snare Drum",		// 14 snare_drum_engine
-	"Hi-Hat",		// 15 hi_hat_engine
-	"VA VCF",		// 16 virtual_analog_vcf_engine
-	"Phase Dist",		// 17 phase_distortion_engine
-	"6-op FM",		// 18 six_op_engine
-	"Wave Terrain",		// 19 wave_terrain_engine
-	"Str Machine",		// 20 string_machine_engine
-	"Chiptune",		// 21 chiptune_engine
+	"VA VCF",		//  0 virtual_analog_vcf_engine_
+	"Phase Dist",		//  1 phase_distortion_engine_
+	"6-op FM A",		//  2 six_op_engine_ (algo bank A — fm_patches_table[0])
+	"6-op FM B",		//  3 six_op_engine_ (algo bank B — fm_patches_table[1])
+	"6-op FM C",		//  4 six_op_engine_ (algo bank C — fm_patches_table[2])
+	"Wave Terrain",		//  5 wave_terrain_engine_
+	"Str Machine",		//  6 string_machine_engine_
+	"Chiptune",		//  7 chiptune_engine_
+	"VA Analog",		//  8 virtual_analog_engine_
+	"Waveshaper",		//  9 waveshaping_engine_
+	"FM 2-op",		// 10 fm_engine_
+	"Grain",		// 11 grain_engine_
+	"Additive",		// 12 additive_engine_
+	"Wavetable",		// 13 wavetable_engine_
+	"Chord",		// 14 chord_engine_
+	"Speech",		// 15 speech_engine_
+	"Swarm",		// 16 swarm_engine_
+	"Filt Noise",		// 17 noise_engine_
+	"Particle",		// 18 particle_engine_
+	"String",		// 19 string_engine_
+	"Modal",		// 20 modal_engine_
+	"Bass Drum",		// 21 bass_drum_engine_
+	"Snare Drum",		// 22 snare_drum_engine_
+	"Hi-Hat",		// 23 hi_hat_engine_
 };
-static constexpr uint16_t NUM_ENGINES = 22;
+static constexpr uint16_t NUM_ENGINES = 24;
 
 static const TParamDesc s_Params[NUM_PARAMS] =
 {
 	//  pId            pLabel         Type               Display              fMin   fMax   fDef  fStep  ppOpt          nOpt
-	{ "engine",       "Engine",      ParamType::Enum,   ParamDisplay::Raw,   0.0f,  21.0f, 0.0f, 1.0f, s_EngineNames, NUM_ENGINES },
+	{ "engine",       "Engine",      ParamType::Enum,   ParamDisplay::Raw,   0.0f,  23.0f, 0.0f, 1.0f, s_EngineNames, NUM_ENGINES },
 	{ "harmonics",    "Harmonics",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
 	{ "timbre",       "Timbre",      ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
 	{ "morph",        "Morph",       ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
@@ -78,7 +83,9 @@ static const TParamDesc s_NullParam = { "", "", ParamType::Float, ParamDisplay::
 // ── Constructor / Destructor ─────────────────────────────────────────────────
 
 CPlaitsGenerator::CPlaitsGenerator ()
-:	m_nCurrentNote (60),
+:	m_fLiveMod {0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+	m_bLiveModActive (false),
+	m_nCurrentNote (60),
 	m_fVelocity (0.0f),
 	m_bGateOpen (false),
 	m_bTriggerArmed (false),
@@ -183,6 +190,24 @@ int CPlaitsGenerator::FindParam (const char *pId) const
 size_t CPlaitsGenerator::Serialize (uint8_t *, size_t) const { return 0; }
 size_t CPlaitsGenerator::Deserialize (const uint8_t *, size_t) { return 0; }
 
+// ── Live modulation (called from the mod router in the main loop) ─────────────
+
+void CPlaitsGenerator::SetLiveModulations (float fTimbre, float fMorph, float fHarmonics,
+					    float fFMAmt,  float fLPGCol)
+{
+	m_fLiveMod[0] = fTimbre;
+	m_fLiveMod[1] = fMorph;
+	m_fLiveMod[2] = fHarmonics;
+	m_fLiveMod[3] = fFMAmt;
+	m_fLiveMod[4] = fLPGCol;
+	m_bLiveModActive = true;
+}
+
+void CPlaitsGenerator::ClearLiveModulations ()
+{
+	m_bLiveModActive = false;
+}
+
 // ── ISoundGenerator: MIDI ────────────────────────────────────────────────────
 
 void CPlaitsGenerator::NoteOn (uint8_t nNote, uint8_t nVelocity)
@@ -234,8 +259,23 @@ void CPlaitsGenerator::Process (float *pOutL, float *pOutR, unsigned nFrames)
 	// to fill the host's 256-frame block.
 	static constexpr unsigned kPlaitsBlock = plaits::kBlockSize;
 
-	// Set up modulations for this block.
+	// Update the note in the persistent patch (dynamic state, not a user param).
 	m_Patch.note = (float) m_nCurrentNote + m_fPitchBend;
+
+	// Make a render copy and apply any live mod-router offsets.
+	// We never mutate m_Patch with mod values so the preset is preserved.
+	plaits::Patch patch = m_Patch;
+	if (m_bLiveModActive)
+	{
+		auto c = [](float v) -> float { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; };
+		patch.timbre     = c (patch.timbre     + m_fLiveMod[0]);
+		patch.morph      = c (patch.morph      + m_fLiveMod[1]);
+		patch.harmonics  = c (patch.harmonics  + m_fLiveMod[2]);
+		patch.frequency_modulation_amount = c (patch.frequency_modulation_amount + m_fLiveMod[3]);
+		patch.lpg_colour = c (patch.lpg_colour + m_fLiveMod[4]);
+	}
+
+	// Set up modulations for this block.
 	m_Modulations.note      = 0.0f;
 	m_Modulations.frequency = 0.0f;
 	m_Modulations.harmonics = 0.0f;
@@ -256,7 +296,7 @@ void CPlaitsGenerator::Process (float *pOutL, float *pOutR, unsigned nFrames)
 			chunk = kPlaitsBlock;
 
 		plaits::Voice::Frame frames[kPlaitsBlock];
-		m_Voice.Render (m_Patch, m_Modulations, frames, chunk);
+		m_Voice.Render (patch, m_Modulations, frames, chunk);
 
 		// After the first sub-block, trigger must stay low (edge consumed).
 		m_Modulations.trigger = 0.0f;

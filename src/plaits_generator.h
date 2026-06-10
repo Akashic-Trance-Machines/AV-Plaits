@@ -45,6 +45,15 @@ public:
 	void	AllNotesOff () override;
 	void	Process (float *pOutL, float *pOutR, unsigned nFrames) override;
 
+	// Live modulation — called from the main-loop mod router to apply LFO /
+	// cyclic-envelope offsets on top of the current preset values.
+	// Written from the main loop, read from the audio callback.  Single-float
+	// stores/loads on AArch64 are atomic; the worst case is one block rendered
+	// with a slightly stale value, which is inaudible for smooth modulation.
+	void	SetLiveModulations (float fTimbre, float fMorph, float fHarmonics,
+				    float fFMAmt,  float fLPGCol);
+	void	ClearLiveModulations ();
+
 private:
 	// Plaits core
 	plaits::Voice		m_Voice;
@@ -54,6 +63,11 @@ private:
 	// Voice memory pool (Plaits uses BufferAllocator, no heap).
 	static constexpr unsigned VOICE_MEM_SIZE = 65536;
 	uint8_t			m_VoiceMem[VOICE_MEM_SIZE];
+
+	// Live modulation offsets (main-loop → audio callback).
+	// [0]=timbre [1]=morph [2]=harmonics [3]=fm_amt [4]=lpg_colour
+	volatile float		m_fLiveMod[5];
+	volatile bool		m_bLiveModActive;
 
 	// MIDI state
 	uint8_t			m_nCurrentNote;
