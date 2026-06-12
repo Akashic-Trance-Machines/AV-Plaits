@@ -2,7 +2,7 @@
   "id": "plaits",
   "name": "Plaits",
   "kind": "generator",
-  "version": 1,
+  "version": 2,
   "credits": "Mutable Instruments (Émilie Gillet); port: Akashic Trance Machines",
   "license": "MIT",
 
@@ -13,12 +13,12 @@
       "type": "enum",
       "default": 0,
       "options": [
+        "VA VCF", "Phase Dist", "6-op FM A", "6-op FM B", "6-op FM C",
+        "Wave Terrain", "Str Machine", "Chiptune",
         "VA Analog", "Waveshaper", "FM 2-op", "Grain", "Additive",
         "Wavetable", "Chord", "Speech", "Swarm",
-        "Filtered Noise", "Particle", "String", "Modal",
-        "Bass Drum", "Snare Drum", "Hi-Hat",
-        "VA VCF", "Phase Dist", "6-op FM", "Wave Terr",
-        "Str Machine", "Chiptune"
+        "Filt Noise", "Particle", "String", "Modal",
+        "Bass Drum", "Snare Drum", "Hi-Hat"
       ]
     },
     {
@@ -84,12 +84,106 @@
       "min": 0.0, "max": 1.0, "default": 0.0,
       "step": 0.01,
       "display": "percent"
+    },
+    {
+      "id": "voices",
+      "label": "Voices",
+      "type": "enum",
+      "default": 7,
+      "options": ["Mono", "2", "3", "4", "5", "6", "7", "8"]
+    },
+    {
+      "id": "mono_trig",
+      "label": "Mono Trig",
+      "type": "enum",
+      "default": 0,
+      "options": ["Legato", "Retrig"]
+    },
+    {
+      "id": "mod_src_timbre",
+      "label": "Timbre Src",
+      "type": "enum",
+      "default": 0,
+      "options": ["None", "LFO1", "LFO2", "Env1", "Env2"]
+    },
+    {
+      "id": "mod_amt_timbre",
+      "label": "Timbre Amt",
+      "type": "float",
+      "min": -1.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "mod_src_morph",
+      "label": "Morph Src",
+      "type": "enum",
+      "default": 0,
+      "options": ["None", "LFO1", "LFO2", "Env1", "Env2"]
+    },
+    {
+      "id": "mod_amt_morph",
+      "label": "Morph Amt",
+      "type": "float",
+      "min": -1.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "mod_src_harm",
+      "label": "Harm Src",
+      "type": "enum",
+      "default": 0,
+      "options": ["None", "LFO1", "LFO2", "Env1", "Env2"]
+    },
+    {
+      "id": "mod_amt_harm",
+      "label": "Harm Amt",
+      "type": "float",
+      "min": -1.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "mod_src_fm",
+      "label": "FM Src",
+      "type": "enum",
+      "default": 0,
+      "options": ["None", "LFO1", "LFO2", "Env1", "Env2"]
+    },
+    {
+      "id": "mod_amt_fm",
+      "label": "FM Amt",
+      "type": "float",
+      "min": -1.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
+    },
+    {
+      "id": "mod_src_lpg",
+      "label": "LPG Src",
+      "type": "enum",
+      "default": 0,
+      "options": ["None", "LFO1", "LFO2", "Env1", "Env2"]
+    },
+    {
+      "id": "mod_amt_lpg",
+      "label": "LPG Amt",
+      "type": "float",
+      "min": -1.0, "max": 1.0, "default": 0.0,
+      "step": 0.01,
+      "display": "percent"
     }
   ],
 
   "menu": [
-    { "page": "Main",   "items": ["engine", "harmonics", "timbre", "morph"] },
+    { "page": "Main",   "items": ["engine", "voices", "mono_trig", "timbre", "morph", "harmonics"] },
     { "page": "Tone",   "items": ["decay", "lpg_colour"] },
-    { "page": "Mod",    "items": ["fm_amt", "timbre_mod", "morph_mod"] }
+    { "page": "Mod",    "items": ["fm_amt", "timbre_mod", "morph_mod",
+                                  "mod_src_timbre", "mod_amt_timbre",
+                                  "mod_src_morph",  "mod_amt_morph",
+                                  "mod_src_harm",   "mod_amt_harm",
+                                  "mod_src_fm",     "mod_amt_fm",
+                                  "mod_src_lpg",    "mod_amt_lpg"] }
   ]
 }

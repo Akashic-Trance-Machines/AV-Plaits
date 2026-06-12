@@ -2,6 +2,7 @@
 // plaits_generator.cpp
 //
 // AV-Plaits — ISoundGenerator wrapper for Mutable Instruments Plaits.
+// Polyphonic voice pool + pull-style mod routing.
 // Copyright (C) 2026  The Akashic Trance Machines Team
 // This file is part of AV-Plaits and is licensed under GPL-3.0.
 // See ../LICENSE.
@@ -11,6 +12,7 @@
 #include "stmlib/utils/buffer_allocator.h"
 #include "engine/imodule.h"
 #include <cstring>
+#include <cmath>
 
 // Factory function expected by CModuleRegistry (gen_menus.py generates the extern).
 IModule *Create_plaits () { return new CPlaitsGenerator (); }
@@ -27,6 +29,18 @@ enum ParamId : unsigned
 	P_FM_AMT,
 	P_TIMBRE_MOD,
 	P_MORPH_MOD,
+	P_VOICES,
+	P_MONO_TRIG,
+	P_SRC_TIMBRE,
+	P_AMT_TIMBRE,
+	P_SRC_MORPH,
+	P_AMT_MORPH,
+	P_SRC_HARM,
+	P_AMT_HARM,
+	P_SRC_FM,
+	P_AMT_FM,
+	P_SRC_LPG,
+	P_AMT_LPG,
 	NUM_PARAMS
 };
 
@@ -63,18 +77,34 @@ static const char *const s_EngineNames[] =
 };
 static constexpr uint16_t NUM_ENGINES = 24;
 
+static const char *const s_VoicesNames[]   = { "Mono", "2", "3", "4", "5", "6", "7", "8" };
+static const char *const s_MonoTrigNames[] = { "Legato", "Retrig" };
+static const char *const s_ModSrcNames[]   = { "None", "LFO1", "LFO2", "Env1", "Env2" };
+
 static const TParamDesc s_Params[NUM_PARAMS] =
 {
-	//  pId            pLabel         Type               Display              fMin   fMax   fDef  fStep  ppOpt          nOpt
-	{ "engine",       "Engine",      ParamType::Enum,   ParamDisplay::Raw,   0.0f,  23.0f, 0.0f, 1.0f, s_EngineNames, NUM_ENGINES },
-	{ "harmonics",    "Harmonics",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
-	{ "timbre",       "Timbre",      ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
-	{ "morph",        "Morph",       ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
-	{ "decay",        "Decay",       ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
-	{ "lpg_colour",   "LPG Colour",  ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.5f, 0.01f, nullptr, 0 },
-	{ "fm_amt",       "FM Amount",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.0f, 0.01f, nullptr, 0 },
-	{ "timbre_mod",   "Timbre Mod",  ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.0f, 0.01f, nullptr, 0 },
-	{ "morph_mod",    "Morph Mod",   ParamType::Float, ParamDisplay::Percent, 0.0f, 1.0f, 0.0f, 0.01f, nullptr, 0 },
+	//  pId             pLabel          Type               Display                fMin   fMax   fDef  fStep  ppOpt           nOpt
+	{ "engine",        "Engine",       ParamType::Enum,  ParamDisplay::Raw,      0.0f, 23.0f, 0.0f, 1.0f,  s_EngineNames,   NUM_ENGINES },
+	{ "harmonics",     "Harmonics",    ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "timbre",        "Timbre",       ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "morph",         "Morph",        ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "decay",         "Decay",        ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "lpg_colour",    "LPG Colour",   ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.5f, 0.01f, nullptr, 0 },
+	{ "fm_amt",        "FM Amount",    ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "timbre_mod",    "Timbre Mod",   ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "morph_mod",     "Morph Mod",    ParamType::Float, ParamDisplay::Percent,  0.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "voices",        "Voices",       ParamType::Enum,  ParamDisplay::Raw,      0.0f,  7.0f, 7.0f, 1.0f,  s_VoicesNames,   8 },
+	{ "mono_trig",     "Mono Trig",    ParamType::Enum,  ParamDisplay::Raw,      0.0f,  1.0f, 0.0f, 1.0f,  s_MonoTrigNames, 2 },
+	{ "mod_src_timbre","Timbre Src",   ParamType::Enum,  ParamDisplay::Raw,      0.0f,  4.0f, 0.0f, 1.0f,  s_ModSrcNames,   5 },
+	{ "mod_amt_timbre","Timbre Amt",   ParamType::Float, ParamDisplay::Percent, -1.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "mod_src_morph", "Morph Src",    ParamType::Enum,  ParamDisplay::Raw,      0.0f,  4.0f, 0.0f, 1.0f,  s_ModSrcNames,   5 },
+	{ "mod_amt_morph", "Morph Amt",    ParamType::Float, ParamDisplay::Percent, -1.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "mod_src_harm",  "Harm Src",     ParamType::Enum,  ParamDisplay::Raw,      0.0f,  4.0f, 0.0f, 1.0f,  s_ModSrcNames,   5 },
+	{ "mod_amt_harm",  "Harm Amt",     ParamType::Float, ParamDisplay::Percent, -1.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "mod_src_fm",    "FM Src",       ParamType::Enum,  ParamDisplay::Raw,      0.0f,  4.0f, 0.0f, 1.0f,  s_ModSrcNames,   5 },
+	{ "mod_amt_fm",    "FM Amt",       ParamType::Float, ParamDisplay::Percent, -1.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
+	{ "mod_src_lpg",   "LPG Src",      ParamType::Enum,  ParamDisplay::Raw,      0.0f,  4.0f, 0.0f, 1.0f,  s_ModSrcNames,   5 },
+	{ "mod_amt_lpg",   "LPG Amt",      ParamType::Float, ParamDisplay::Percent, -1.0f,  1.0f, 0.0f, 0.01f, nullptr, 0 },
 };
 
 // Null descriptor returned for out-of-range index.
@@ -83,26 +113,49 @@ static const TParamDesc s_NullParam = { "", "", ParamType::Float, ParamDisplay::
 // ── Constructor / Destructor ─────────────────────────────────────────────────
 
 CPlaitsGenerator::CPlaitsGenerator ()
-:	m_fLiveMod {0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-	m_bLiveModActive (false),
-	m_nCurrentNote (60),
-	m_fVelocity (0.0f),
-	m_bGateOpen (false),
-	m_bTriggerArmed (false),
+:	m_nAgeCounter (0),
+	m_nSampleRate (48000),
+	m_nPoly (MAX_VOICES),
+	m_bMonoRetrig (false),
+	m_fOutScale (1.0f),
+	m_nHeld (0),
 	m_fPitchBend (0.0f)
 {
 	memset (&m_Patch, 0, sizeof (m_Patch));
 	memset (&m_Modulations, 0, sizeof (m_Modulations));
 	memset (m_VoiceMem, 0, sizeof (m_VoiceMem));
+	memset (m_HeldNotes, 0, sizeof (m_HeldNotes));
+	for (unsigned i = 0; i < MAX_VOICES; i++)
+	{
+		m_Voice[i].nNote       = 60;
+		m_Voice[i].fVelocity   = 0.0f;
+		m_Voice[i].bGate       = false;
+		m_Voice[i].bTrigArmed  = false;
+		m_Voice[i].bActive     = false;
+		m_Voice[i].nAge        = 0;
+		m_Voice[i].nTailFrames = 0;
+	}
+	for (unsigned d = 0; d < NUM_MOD_DESTS; d++)
+	{
+		m_nModSrc[d] = 0;
+		m_fModAmt[d] = 0.0f;
+	}
+	for (unsigned s = 0; s < 4; s++)
+		m_fModSrcVal[s] = 0.0f;
 }
 
 CPlaitsGenerator::~CPlaitsGenerator () {}
 
-void CPlaitsGenerator::Init (unsigned /*nSampleRate*/, unsigned /*nMaxBlock*/)
+void CPlaitsGenerator::Init (unsigned nSampleRate, unsigned /*nMaxBlock*/)
 {
-	stmlib::BufferAllocator allocator;
-	allocator.Init (m_VoiceMem, sizeof (m_VoiceMem));
-	m_Voice.Init (&allocator);
+	m_nSampleRate = nSampleRate ? nSampleRate : 48000;
+
+	for (unsigned i = 0; i < MAX_VOICES; i++)
+	{
+		stmlib::BufferAllocator allocator;
+		allocator.Init (m_VoiceMem[i], VOICE_MEM_SIZE);
+		m_Voice[i].Voice.Init (&allocator);
+	}
 
 	// Defaults
 	m_Patch.engine		= 0;
@@ -121,19 +174,25 @@ void CPlaitsGenerator::Init (unsigned /*nSampleRate*/, unsigned /*nMaxBlock*/)
 	m_Modulations.morph_patched     = false;
 	m_Modulations.trigger_patched   = true;
 	m_Modulations.level_patched     = true;
+
+	m_fOutScale = 1.0f / sqrtf ((float) m_nPoly);
 }
 
 void CPlaitsGenerator::Reset ()
 {
-	m_bGateOpen     = false;
-	m_bTriggerArmed = false;
-	m_fVelocity     = 0.0f;
-	m_nCurrentNote  = 60;
-	m_fPitchBend    = 0.0f;
-	// Re-init voice to clear all internal DSP state.
-	stmlib::BufferAllocator allocator;
-	allocator.Init (m_VoiceMem, sizeof (m_VoiceMem));
-	m_Voice.Init (&allocator);
+	m_fPitchBend = 0.0f;
+	m_nHeld      = 0;
+	for (unsigned i = 0; i < MAX_VOICES; i++)
+	{
+		TVoice &v = m_Voice[i];
+		v.bGate = v.bTrigArmed = v.bActive = false;
+		v.fVelocity = 0.0f;
+		v.nTailFrames = 0;
+		// Re-init voice to clear all internal DSP state.
+		stmlib::BufferAllocator allocator;
+		allocator.Init (m_VoiceMem[i], VOICE_MEM_SIZE);
+		v.Voice.Init (&allocator);
+	}
 }
 
 // ── IModule: params ──────────────────────────────────────────────────────────
@@ -159,6 +218,18 @@ TParamValue CPlaitsGenerator::GetParam (unsigned nIndex) const
 		case P_FM_AMT:		v.f = m_Patch.frequency_modulation_amount; break;
 		case P_TIMBRE_MOD:	v.f = m_Patch.timbre_modulation_amount; break;
 		case P_MORPH_MOD:	v.f = m_Patch.morph_modulation_amount; break;
+		case P_VOICES:		v.f = (float) (m_nPoly - 1); break;
+		case P_MONO_TRIG:	v.f = m_bMonoRetrig ? 1.0f : 0.0f; break;
+		case P_SRC_TIMBRE:	v.f = (float) m_nModSrc[0]; break;
+		case P_AMT_TIMBRE:	v.f = m_fModAmt[0]; break;
+		case P_SRC_MORPH:	v.f = (float) m_nModSrc[1]; break;
+		case P_AMT_MORPH:	v.f = m_fModAmt[1]; break;
+		case P_SRC_HARM:	v.f = (float) m_nModSrc[2]; break;
+		case P_AMT_HARM:	v.f = m_fModAmt[2]; break;
+		case P_SRC_FM:		v.f = (float) m_nModSrc[3]; break;
+		case P_AMT_FM:		v.f = m_fModAmt[3]; break;
+		case P_SRC_LPG:		v.f = (float) m_nModSrc[4]; break;
+		case P_AMT_LPG:		v.f = m_fModAmt[4]; break;
 	}
 	return v;
 }
@@ -176,6 +247,35 @@ void CPlaitsGenerator::SetParam (unsigned nIndex, TParamValue Value)
 		case P_FM_AMT:		m_Patch.frequency_modulation_amount = Value.f; break;
 		case P_TIMBRE_MOD:	m_Patch.timbre_modulation_amount    = Value.f; break;
 		case P_MORPH_MOD:	m_Patch.morph_modulation_amount     = Value.f; break;
+
+		case P_VOICES:
+		{
+			unsigned nNew = (unsigned) Value.AsInt () + 1;
+			if (nNew < 1) nNew = 1;
+			if (nNew > MAX_VOICES) nNew = MAX_VOICES;
+			if (nNew != m_nPoly)
+			{
+				m_nPoly = nNew;
+				m_fOutScale = 1.0f / sqrtf ((float) m_nPoly);
+				m_nHeld = 0;
+				// Release voices outside the new pool so they fade out.
+				for (unsigned i = m_nPoly; i < MAX_VOICES; i++)
+					if (m_Voice[i].bActive && m_Voice[i].bGate)
+						ReleaseVoice (m_Voice[i]);
+			}
+			break;
+		}
+		case P_MONO_TRIG:	m_bMonoRetrig = Value.AsInt () != 0; break;
+		case P_SRC_TIMBRE:	m_nModSrc[0] = (uint8_t) Value.AsInt (); break;
+		case P_AMT_TIMBRE:	m_fModAmt[0] = Value.f; break;
+		case P_SRC_MORPH:	m_nModSrc[1] = (uint8_t) Value.AsInt (); break;
+		case P_AMT_MORPH:	m_fModAmt[1] = Value.f; break;
+		case P_SRC_HARM:	m_nModSrc[2] = (uint8_t) Value.AsInt (); break;
+		case P_AMT_HARM:	m_fModAmt[2] = Value.f; break;
+		case P_SRC_FM:		m_nModSrc[3] = (uint8_t) Value.AsInt (); break;
+		case P_AMT_FM:		m_fModAmt[3] = Value.f; break;
+		case P_SRC_LPG:		m_nModSrc[4] = (uint8_t) Value.AsInt (); break;
+		case P_AMT_LPG:		m_fModAmt[4] = Value.f; break;
 	}
 }
 
@@ -190,22 +290,98 @@ int CPlaitsGenerator::FindParam (const char *pId) const
 size_t CPlaitsGenerator::Serialize (uint8_t *, size_t) const { return 0; }
 size_t CPlaitsGenerator::Deserialize (const uint8_t *, size_t) { return 0; }
 
-// ── Live modulation (called from the mod router in the main loop) ─────────────
+// ── Mod sources (pushed from the mod router in the main loop) ─────────────────
 
-void CPlaitsGenerator::SetLiveModulations (float fTimbre, float fMorph, float fHarmonics,
-					    float fFMAmt,  float fLPGCol)
+void CPlaitsGenerator::SetModSources (float fLFO1, float fLFO2, float fEnv1, float fEnv2)
 {
-	m_fLiveMod[0] = fTimbre;
-	m_fLiveMod[1] = fMorph;
-	m_fLiveMod[2] = fHarmonics;
-	m_fLiveMod[3] = fFMAmt;
-	m_fLiveMod[4] = fLPGCol;
-	m_bLiveModActive = true;
+	m_fModSrcVal[0] = fLFO1;
+	m_fModSrcVal[1] = fLFO2;
+	m_fModSrcVal[2] = fEnv1;
+	m_fModSrcVal[3] = fEnv2;
 }
 
-void CPlaitsGenerator::ClearLiveModulations ()
+// ── Voice pool helpers ────────────────────────────────────────────────────────
+
+int CPlaitsGenerator::TailFrames () const
 {
-	m_bLiveModActive = false;
+	// Release tail scales with the decay parameter: 0.1 s .. 3.0 s.
+	float fSeconds = 0.1f + m_Patch.decay * 2.9f;
+	return (int) (fSeconds * (float) m_nSampleRate);
+}
+
+void CPlaitsGenerator::StartVoice (TVoice &v, uint8_t nNote, float fVel)
+{
+	v.nNote       = nNote;
+	v.fVelocity   = fVel;
+	v.bGate       = true;
+	v.bTrigArmed  = true;
+	v.bActive     = true;
+	v.nAge        = ++m_nAgeCounter;
+	v.nTailFrames = 0;
+}
+
+void CPlaitsGenerator::ReleaseVoice (TVoice &v)
+{
+	v.bGate       = false;
+	v.nTailFrames = TailFrames ();
+}
+
+// Released-first, then oldest. Only voices [0..m_nPoly) participate.
+int CPlaitsGenerator::AllocVoice ()
+{
+	int nFree = -1, nReleased = -1, nOldest = -1;
+	uint32_t nReleasedAge = 0xFFFFFFFF, nOldestAge = 0xFFFFFFFF;
+
+	for (unsigned i = 0; i < m_nPoly; i++)
+	{
+		TVoice &v = m_Voice[i];
+		if (!v.bActive)
+		{
+			nFree = (int) i;
+			break;
+		}
+		if (!v.bGate && v.nAge < nReleasedAge)
+		{
+			nReleased = (int) i;
+			nReleasedAge = v.nAge;
+		}
+		if (v.nAge < nOldestAge)
+		{
+			nOldest = (int) i;
+			nOldestAge = v.nAge;
+		}
+	}
+
+	if (nFree >= 0)     return nFree;
+	if (nReleased >= 0) return nReleased;
+	return nOldest;
+}
+
+// ── Mono note stack ───────────────────────────────────────────────────────────
+
+void CPlaitsGenerator::HeldPush (uint8_t nNote)
+{
+	HeldRemove (nNote);			// no duplicates
+	if (m_nHeld >= MAX_HELD)
+	{
+		// Stack full: drop the oldest entry.
+		memmove (m_HeldNotes, m_HeldNotes + 1, MAX_HELD - 1);
+		m_nHeld = MAX_HELD - 1;
+	}
+	m_HeldNotes[m_nHeld++] = nNote;
+}
+
+void CPlaitsGenerator::HeldRemove (uint8_t nNote)
+{
+	for (unsigned i = 0; i < m_nHeld; i++)
+	{
+		if (m_HeldNotes[i] == nNote)
+		{
+			memmove (m_HeldNotes + i, m_HeldNotes + i + 1, m_nHeld - i - 1);
+			m_nHeld--;
+			return;
+		}
+	}
 }
 
 // ── ISoundGenerator: MIDI ────────────────────────────────────────────────────
@@ -217,16 +393,78 @@ void CPlaitsGenerator::NoteOn (uint8_t nNote, uint8_t nVelocity)
 		NoteOff (nNote, 0);
 		return;
 	}
-	m_nCurrentNote  = nNote;
-	m_fVelocity     = (float) nVelocity / 127.0f;
-	m_bGateOpen     = true;
-	m_bTriggerArmed = true;		// will emit rising-edge pulse in next Process()
+	float fVel = (float) nVelocity / 127.0f;
+
+	if (m_nPoly == 1)
+	{
+		// ── Mono: last-note priority ─────────────────────────────────
+		TVoice &v = m_Voice[0];
+		bool bLegato = v.bActive && v.bGate && !m_bMonoRetrig;
+		HeldPush (nNote);
+		if (bLegato)
+		{
+			// Slide to the new note without retriggering.
+			v.nNote     = nNote;
+			v.fVelocity = fVel;
+			v.nAge      = ++m_nAgeCounter;
+		}
+		else
+		{
+			StartVoice (v, nNote, fVel);
+		}
+		return;
+	}
+
+	// ── Poly ──────────────────────────────────────────────────────────────
+	// Same note already sounding with gate open → retrigger that voice.
+	for (unsigned i = 0; i < m_nPoly; i++)
+	{
+		TVoice &v = m_Voice[i];
+		if (v.bActive && v.bGate && v.nNote == nNote)
+		{
+			StartVoice (v, nNote, fVel);
+			return;
+		}
+	}
+
+	int idx = AllocVoice ();
+	if (idx >= 0)
+		StartVoice (m_Voice[idx], nNote, fVel);
 }
 
 void CPlaitsGenerator::NoteOff (uint8_t nNote, uint8_t /*nVelocity*/)
 {
-	if (nNote == m_nCurrentNote)
-		m_bGateOpen = false;
+	if (m_nPoly == 1)
+	{
+		// ── Mono: fall back to a still-held earlier note ─────────────
+		HeldRemove (nNote);
+		TVoice &v = m_Voice[0];
+		if (!v.bActive || !v.bGate || v.nNote != nNote)
+			return;
+		if (m_nHeld > 0)
+		{
+			uint8_t nPrev = m_HeldNotes[m_nHeld - 1];
+			if (m_bMonoRetrig)
+				StartVoice (v, nPrev, v.fVelocity);
+			else
+				v.nNote = nPrev;	// legato fall-back
+		}
+		else
+		{
+			ReleaseVoice (v);
+		}
+		return;
+	}
+
+	for (unsigned i = 0; i < m_nPoly; i++)
+	{
+		TVoice &v = m_Voice[i];
+		if (v.bActive && v.bGate && v.nNote == nNote)
+		{
+			ReleaseVoice (v);
+			return;
+		}
+	}
 }
 
 void CPlaitsGenerator::ControlChange (uint8_t nCC, uint8_t nValue)
@@ -249,70 +487,98 @@ void CPlaitsGenerator::PitchBend (int nValue14)
 }
 
 void CPlaitsGenerator::ChannelPressure (uint8_t /*nValue*/) {}
-void CPlaitsGenerator::AllNotesOff () { m_bGateOpen = false; m_bTriggerArmed = false; m_fVelocity = 0.0f; }
+
+void CPlaitsGenerator::AllNotesOff ()
+{
+	m_nHeld = 0;
+	for (unsigned i = 0; i < MAX_VOICES; i++)
+		if (m_Voice[i].bActive && m_Voice[i].bGate)
+			ReleaseVoice (m_Voice[i]);
+}
 
 // ── ISoundGenerator: audio render ────────────────────────────────────────────
 
 void CPlaitsGenerator::Process (float *pOutL, float *pOutR, unsigned nFrames)
 {
 	// Plaits renders in blocks of kBlockSize (12). We call it repeatedly
-	// to fill the host's 256-frame block.
+	// per voice to fill the host's 256-frame block, accumulating into the
+	// output buffers.
 	static constexpr unsigned kPlaitsBlock = plaits::kBlockSize;
 
-	// Update the note in the persistent patch (dynamic state, not a user param).
-	m_Patch.note = (float) m_nCurrentNote + m_fPitchBend;
-
-	// Make a render copy and apply any live mod-router offsets.
-	// We never mutate m_Patch with mod values so the preset is preserved.
+	// ── Build the routed patch for this block ────────────────────────────
+	// Copy, never mutate m_Patch with mod values — presets stay clean.
 	plaits::Patch patch = m_Patch;
-	if (m_bLiveModActive)
 	{
 		auto c = [](float v) -> float { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; };
-		patch.timbre     = c (patch.timbre     + m_fLiveMod[0]);
-		patch.morph      = c (patch.morph      + m_fLiveMod[1]);
-		patch.harmonics  = c (patch.harmonics  + m_fLiveMod[2]);
-		patch.frequency_modulation_amount = c (patch.frequency_modulation_amount + m_fLiveMod[3]);
-		patch.lpg_colour = c (patch.lpg_colour + m_fLiveMod[4]);
+		float *dest[NUM_MOD_DESTS] =
+		{
+			&patch.timbre, &patch.morph, &patch.harmonics,
+			&patch.frequency_modulation_amount, &patch.lpg_colour
+		};
+		for (unsigned d = 0; d < NUM_MOD_DESTS; d++)
+		{
+			unsigned src = m_nModSrc[d];
+			if (src >= 1 && src <= 4)
+				*dest[d] = c (*dest[d] + m_fModSrcVal[src - 1] * m_fModAmt[d]);
+		}
 	}
 
-	// Set up modulations for this block.
-	m_Modulations.note      = 0.0f;
-	m_Modulations.frequency = 0.0f;
-	m_Modulations.harmonics = 0.0f;
-	m_Modulations.timbre    = 0.0f;
-	m_Modulations.morph     = 0.0f;
-	// Trigger: Plaits expects a rising-edge pulse (0→1) for attack.
-	// Armed on NoteOn, fired once, then held at 0 while gate stays open.
-	// Level acts as VCA: velocity while gate open, 0 when released.
-	m_Modulations.trigger = m_bTriggerArmed ? 1.0f : 0.0f;
-	m_Modulations.level   = m_bGateOpen ? m_fVelocity : 0.0f;
-	m_bTriggerArmed = false;	// pulse consumed
+	// Clear output; voices accumulate.
+	memset (pOutL, 0, nFrames * sizeof (float));
+	memset (pOutR, 0, nFrames * sizeof (float));
 
-	unsigned written = 0;
-	while (written < nFrames)
+	static constexpr float kScale    = 1.0f / 32768.0f;
+	static constexpr float kAuxBlend = 0.2f;
+	const float fGain = m_fOutScale * kScale;
+
+	for (unsigned nv = 0; nv < MAX_VOICES; nv++)
 	{
-		unsigned chunk = nFrames - written;
-		if (chunk > kPlaitsBlock)
-			chunk = kPlaitsBlock;
+		TVoice &v = m_Voice[nv];
+		if (!v.bActive)
+			continue;
 
-		plaits::Voice::Frame frames[kPlaitsBlock];
-		m_Voice.Render (patch, m_Modulations, frames, chunk);
+		patch.note = (float) v.nNote + m_fPitchBend;
 
-		// After the first sub-block, trigger must stay low (edge consumed).
-		m_Modulations.trigger = 0.0f;
+		m_Modulations.note      = 0.0f;
+		m_Modulations.frequency = 0.0f;
+		m_Modulations.harmonics = 0.0f;
+		m_Modulations.timbre    = 0.0f;
+		m_Modulations.morph     = 0.0f;
+		// Trigger: rising-edge pulse (0→1) for attack; level acts as VCA.
+		m_Modulations.trigger = v.bTrigArmed ? 1.0f : 0.0f;
+		m_Modulations.level   = v.bGate ? v.fVelocity : 0.0f;
+		v.bTrigArmed = false;
 
-		// Convert int16 to float [-1, 1].
-		// Plaits' out = main engine, aux = alternate output.
-		// Send main to both L+R (mono); mix a touch of aux for stereo width.
-		static constexpr float kScale    = 1.0f / 32768.0f;
-		static constexpr float kAuxBlend = 0.2f;
-		for (unsigned i = 0; i < chunk; i++)
+		unsigned written = 0;
+		while (written < nFrames)
 		{
-			float main = (float) frames[i].out * kScale;
-			float aux  = (float) frames[i].aux * kScale;
-			pOutL[written + i] = main + aux * kAuxBlend;
-			pOutR[written + i] = main - aux * kAuxBlend;
+			unsigned chunk = nFrames - written;
+			if (chunk > kPlaitsBlock)
+				chunk = kPlaitsBlock;
+
+			plaits::Voice::Frame frames[kPlaitsBlock];
+			v.Voice.Render (patch, m_Modulations, frames, chunk);
+
+			// After the first sub-block, trigger stays low (edge consumed).
+			m_Modulations.trigger = 0.0f;
+
+			// out = main engine, aux = alternate; mono main + aux width.
+			for (unsigned i = 0; i < chunk; i++)
+			{
+				float main = (float) frames[i].out * fGain;
+				float aux  = (float) frames[i].aux * fGain;
+				pOutL[written + i] += main + aux * kAuxBlend;
+				pOutR[written + i] += main - aux * kAuxBlend;
+			}
+			written += chunk;
 		}
-		written += chunk;
+
+		// Release tail countdown → free the voice once it has faded.
+		if (!v.bGate)
+		{
+			v.nTailFrames -= (int) nFrames;
+			if (v.nTailFrames <= 0)
+				v.bActive = false;
+		}
 	}
 }
