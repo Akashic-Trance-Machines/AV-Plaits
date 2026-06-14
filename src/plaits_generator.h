@@ -54,7 +54,7 @@ public:
 	// params (mod_src_* / mod_amt_*). LFO values are bipolar (±depth),
 	// Env values unipolar (0..depth). Single-float stores on AArch64 are
 	// atomic; one block of staleness is inaudible for smooth modulation.
-	void	SetModSources (float fLFO1, float fLFO2, float fEnv1, float fEnv2);
+	void	SetModSources (float fLFO1, float fLFO2, float fEnv1, float fEnv2) override;
 
 private:
 	// ── Voice pool ────────────────────────────────────────────────────────
